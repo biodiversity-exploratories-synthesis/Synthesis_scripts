@@ -1,0 +1,133 @@
+#######################################################################################################
+#   Examples of how to handle large synthesis datasets                                                                   #
+#   Calculate richness, abundance, diversity  and multidiversity from synthesis dataset               #
+#   This script is designed to work with datasets 21766 (version 1.7.8) and 21726 (version 1.6.24)    #
+#   Author: Caterina Penone                                                                           #
+#######################################################################################################
+
+library(data.table)
+library(reshape2)
+library(vegan)
+
+
+############################## Handle synthesis datasets ############
+#Read synthesis datasets using data.table
+# We recommend to use this package to handle the dataset because it is more memory efficient
+# More information here https://github.com/Rdatatable/data.table/wiki and here:
+?data.table
+
+### Raw diversity
+allsp <- fread("21766.txt")
+
+### Species information
+fgs <- fread("21726.txt")
+
+#### Examples of code to subset the datasets ####
+selectID <- c(4140,5522,6100,11422,12386,12526,13146,13526,15086,16746,16871,
+                16893,16894,16895,16896,16897,16908,18548,19526,19686,19786,20146,20326)
+
+allsp <- allsp[DataID %in% selectID]
+rm(selectID)
+
+### remove all plant data not from 2009
+allsp <- allsp[!(DataID %in% 19686 & !Year %in% 2009)]
+
+### check if groups have data for more than one year
+unique(allsp2[,c("Year","Group_broad"),with=F])
+
+### calculate cumulative bird and bat richness (all years)
+birdbat <- c(6100,11422,12386,13146,13526)
+allsp <- allsp[DataID %in% birdbat, value:=sum(value), by=list(Species,Plot)]
+allsp <- unique(allsp, by=c("Plot","Species"))
+
+### check which type of data is included
+unique(allsp$type)
+
+### select only abundance data
+allsp <- allsp[type %in% "abundance"]
+
+### merge functional groups with species file
+allsp2 <- merge(allsp, fgs, by ="Species", all.x=TRUE)
+
+### drop some trophic levels
+levdrop <- c("vert.herb", "omnivore")
+allsp2 <- allsp2[!Trophic_level %in% levdrop]
+rm(levdrop)
+
+### check which species have no information on functional group fine
+allsp2[is.na(Fun_group_fine)]
+
+### check which Group_broad have no information on functional group fine
+unique(allsp2[is.na(Fun_group_fine)]$Group_broad)
+
+### remove species with no info on trophic level
+allsp2 <- allsp2[!is.na(Trophic_level)]
+
+### transform into data.frame
+allsp2 <- data.frame(allsp2)
+
+##############################Calculate richness, abundance, diversity, multidiversity############
+#### Calculate richness ####
+### Raw diversity
+allsp <- fread("21766.txt")
+
+### Species information
+fgs <- fread("21726.txt")
+
+### merge functional groups with species file
+allsp2 <- merge(allsp, fgs, by ="Species", all.x=TRUE)
+
+# Calculate sum of values >1 (i.e. presence) by plot and group (any level can be choen, e.g. Group_broad) across all years
+allsp.rich <- allsp2
+allsp.rich <- allsp.rich[,rich :=sum(value>0),by=c("Plot","Trophic_level")]
+
+# Select only wanted columns and transform into a plot x trophic level matrix
+allsp.rich <- allsp.rich[,.(Plot,Trophic_level,rich)]
+allsp.rich <- unique(allsp.rich)
+allsp.rich <- dcast.data.table(allsp.rich,Plot~Trophic_level)
+  
+
+# or Calculate sum of values >1 (i.e. presence) by plot and group and year (and/or any other factor, e.g. exploratory)
+allsp.rich <- allsp2
+allsp.rich <- allsp2[,rich :=sum(value>0),by=c("Plot","Trophic_level","Year")]
+
+allsp.rich <- allsp.rich[,.(Plot,Trophic_level,Year,rich)]
+allsp.rich <- unique(allsp.rich)
+allsp.rich <- dcast.data.table(allsp.rich,Plot+Year~Trophic_level)    
+    
+
+#### Calculate total abundance ####
+# Calculate sum of values >1 (i.e. presence) by plot and group (any level can be choen, e.g. Group_broad) across all years
+allsp.abun <- allsp2
+allsp.abun <- allsp.abun[,abun :=sum(value),by=c("Plot","Trophic_level")]
+
+# Select only wanted columns and transform into a plot x trophic level matrix
+allsp.abun <- allsp.abun[,.(Plot,Trophic_level,abun)]
+allsp.abun <- unique(allsp.abun)
+allsp.abun <- dcast.data.table(allsp.abun,Plot~Trophic_level)
+
+
+#### Calculate shannon diversity ####
+allsp.div <- allsp2
+TL <- unique(allsp.div$Trophic_level)
+
+allsp.div.m <- dcast.data.table(allsp.div,Plot~Species,fun.aggregate = sum)
+
+allsp.div.sh <- list()
+for (i in TL){
+  TLsp <- unique(allsp.div[Trophic_level %in% i]$Species)
+  allsp.div.mTL <- allsp.div.m[,TLsp,with=F]
+  allsp.div.sh[[i]] <- data.frame(diversity(allsp.div.mTL,index = "shannon"))
+}
+allsp.div <- do.call(cbind,allsp.div.sh)
+names(allsp.div) <- TL
+allsp.div <- cbind(Plot=allsp.div.m$Plot, allsp.div)
+
+
+#### Calculate multidiversity ####
+#download multidiv function (dataID  21707 in beXis)
+
+source("yourpath/21707.R")
+
+# on the richness dataset
+multi.rich <- multidiv(allsp.rich[,-1,with=F])
